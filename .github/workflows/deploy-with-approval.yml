@@ -31,26 +31,6 @@ jobs:
       - name: Build application
         run: npm run build
       
-      - name: Pull Vercel Environment Information
-        run: |
-          npx vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      
-      - name: Build for Vercel
-        run: npx vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            .vercel/output
-          retention-days: 1
 
   deploy-preview:
     needs: build
@@ -61,12 +41,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
-          path: .vercel/output
-      
       - name: Deploy to Vercel Preview
         uses: amondnet/vercel-action@v25
         with:
@@ -74,7 +48,6 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prebuilt'
           github-comment: true
 
   approve-deployment:
@@ -96,12 +69,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
-          path: .vercel/output
-      
       - name: Deploy to Vercel Production
         uses: amondnet/vercel-action@v25
         with:
@@ -109,7 +76,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          vercel-args: '--prod --prebuilt'
+          vercel-args: '--prod'
           github-comment: false
       
       - name: Send deployment notification
