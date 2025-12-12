@@ -31,15 +31,18 @@ jobs:
       - name: Build application
         run: npm run build
       
+      - name: Build for Vercel
+        run: npx vercel build --prod
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
           path: |
-            .next/
-            public/
-            package.json
-            package-lock.json
+            .vercel/output
           retention-days: 1
 
   deploy-preview:
@@ -51,6 +54,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: .vercel/output
+      
       - name: Deploy to Vercel Preview
         uses: amondnet/vercel-action@v25
         with:
@@ -60,8 +69,6 @@ jobs:
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
           vercel-args: '--prebuilt'
           github-comment: true
-          alias-domains: |
-            pr-{{PR_NUMBER}}.your-domain.vercel.app
 
   approve-deployment:
     needs: build
@@ -86,6 +93,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: build-artifacts
+          path: .vercel/output
       
       - name: Deploy to Vercel Production
         uses: amondnet/vercel-action@v25
