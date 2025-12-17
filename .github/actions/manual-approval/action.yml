@@ -1,0 +1,219 @@
+name: 'Manual Approval'
+description: 'GitHub Issue を利用した手動承認フロー'
+
+inputs:
+  approvers:
+    description: '承認者のGitHubユーザー名（カンマ区切り）'
+    required: true
+  issue-title:
+    description: 'Issue のタイトル'
+    required: false
+    default: 'Deploy Approval Required'
+  issue-body:
+    description: 'Issue の本文'
+    required: false
+    default: ''
+  timeout-minutes:
+    description: 'タイムアウト時間（分）'
+    required: false
+    default: '60'
+  poll-interval-seconds:
+    description: 'ポーリング間隔（秒）'
+    required: false
+    default: '30'
+
+outputs:
+  issue-number:
+    description: '作成された Issue 番号'
+    value: ${{ steps.create-issue.outputs.issue_number }}
+  approved-by:
+    description: '承認したユーザー名'
+    value: ${{ steps.wait-approval.outputs.approved_by }}
+  result:
+    description: 'approved / denied / timeout'
+    value: ${{ steps.wait-approval.outputs.result }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create approval issue
+      id: create-issue
+      uses: actions/github-script@v7
+      env:
+        APPROVERS: ${{ inputs.approvers }}
+        ISSUE_TITLE: ${{ inputs.issue-title }}
+        ISSUE_BODY: ${{ inputs.issue-body }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+      with:
+        script: |
+          const approvers = process.env.APPROVERS.split(',').map(u => u.trim()).filter(u => u);
+
+          if (approvers.length === 0) {
+            core.setFailed('承認者が指定されていません');
+            return;
+          }
+
+          const approverMentions = approvers.map(u => `@${u}`).join(', ');
+
+          let issueBody = process.env.ISSUE_BODY;
+          if (!issueBody) {
+            issueBody = `## デプロイ承認依頼
+
+          デプロイの承認をお願いします。
+
+          | 項目 | 内容 |
+          |------|------|
+          | **ワークフロー** | ${context.workflow} |
+          | **実行番号** | #${context.runNumber} |
+          | **コミット** | \`${context.sha.substring(0, 7)}\` |
+          | **実行者** | @${context.actor} |
+          | **ワークフロー実行URL** | [Run #${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |
+
+          ---
+
+          ### 承認方法
+
+          - **承認する場合:** \`approved\` とコメントしてください
+          - **拒否する場合:** \`denied\` とコメントしてください
+
+          ---
+
+          **承認者:** ${approverMentions}
+          **タイムアウト:** ${process.env.TIMEOUT_MINUTES}分
+          `;
+          }
+
+          const issue = await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: process.env.ISSUE_TITLE,
+            body: issueBody,
+            assignees: approvers,
+            labels: ['deployment', 'awaiting-approval']
+          });
+
+          core.setOutput('issue_number', issue.data.number);
+          console.log(`Created approval issue #${issue.data.number}`);
+
+    - name: Wait for approval
+      id: wait-approval
+      uses: actions/github-script@v7
+      env:
+        APPROVERS: ${{ inputs.approvers }}
+        ISSUE_NUMBER: ${{ steps.create-issue.outputs.issue_number }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
+      with:
+        script: |
+          const issueNumber = parseInt(process.env.ISSUE_NUMBER);
+          const approvers = process.env.APPROVERS.split(',').map(u => u.trim().toLowerCase()).filter(u => u);
+          const timeoutMs = parseInt(process.env.TIMEOUT_MINUTES) * 60 * 1000;
+          const pollIntervalMs = parseInt(process.env.POLL_INTERVAL_SECONDS) * 1000;
+          const startTime = Date.now();
+
+          console.log(`Waiting for approval on issue #${issueNumber}`);
+          console.log(`Approvers: ${approvers.join(', ')}`);
+          console.log(`Timeout: ${process.env.TIMEOUT_MINUTES} minutes`);
+
+          // コメント確認用のタイムスタンプ（Issue作成時刻以降のコメントのみ対象）
+          const issueCreatedAt = new Date().toISOString();
+
+          const closeIssue = async (result, approvedBy = '') => {
+            let label, comment;
+            if (result === 'approved') {
+              label = 'approved';
+              comment = `✅ @${approvedBy} によって承認されました。デプロイを続行します。`;
+            } else if (result === 'denied') {
+              label = 'rejected';
+              comment = `❌ @${approvedBy} によって拒否されました。デプロイを中止します。`;
+            } else {
+              label = 'timeout';
+              comment = `⏰ タイムアウトしました（${process.env.TIMEOUT_MINUTES}分）。デプロイを中止します。`;
+            }
+
+            // ラベル更新
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: 'awaiting-approval'
+              });
+            } catch (e) {
+              // ラベルが存在しない場合は無視
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: [label]
+            });
+
+            // コメント追加
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: comment
+            });
+
+            // Issue クローズ
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed'
+            });
+          };
+
+          while (true) {
+            // タイムアウトチェック
+            if (Date.now() - startTime > timeoutMs) {
+              console.log('Timeout reached');
+              await closeIssue('timeout');
+              core.setOutput('result', 'timeout');
+              core.setOutput('approved_by', '');
+              core.setFailed('Approval timeout');
+              return;
+            }
+
+            // コメント取得
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              since: issueCreatedAt
+            });
+
+            // 承認者のコメントのみチェック
+            for (const comment of comments) {
+              const commenter = comment.user.login.toLowerCase();
+              if (!approvers.includes(commenter)) {
+                continue;
+              }
+
+              const body = comment.body.toLowerCase();
+
+              if (body.includes('approved')) {
+                console.log(`Approved by ${comment.user.login}`);
+                await closeIssue('approved', comment.user.login);
+                core.setOutput('result', 'approved');
+                core.setOutput('approved_by', comment.user.login);
+                return;
+              }
+
+              if (body.includes('denied')) {
+                console.log(`Denied by ${comment.user.login}`);
+                await closeIssue('denied', comment.user.login);
+                core.setOutput('result', 'denied');
+                core.setOutput('approved_by', comment.user.login);
+                core.setFailed('Deployment denied');
+                return;
+              }
+            }
+
+            // 待機
+            console.log(`Waiting... (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
+            await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+          }
