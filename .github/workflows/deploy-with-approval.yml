@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+permissions:
+  issues: write
+  contents: read
+
 # 承認者をリポジトリ変数で設定（Settings > Variables > Actions > APPROVERS）
 # カンマ区切りで複数ユーザー指定可能: "user1,user2,org-team1"
 env:
