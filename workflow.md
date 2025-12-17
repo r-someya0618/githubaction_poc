@@ -329,6 +329,64 @@ jobs:
 
 ---
 
+## GitHub側の設定
+
+### 1. リポジトリ変数の設定（必須）
+
+承認者を設定するためのリポジトリ変数を作成します。
+
+1. リポジトリの **Settings** を開く
+2. **Secrets and variables** > **Actions** を選択
+3. **Variables** タブを選択
+4. **New repository variable** をクリック
+5. 以下を入力:
+   - **Name**: `APPROVERS`
+   - **Value**: 承認者のGitHubユーザー名（カンマ区切りで複数指定可能）
+
+```
+例: user1,user2,team-lead
+```
+
+> **注意**: ユーザー名の間にスペースを入れないでください。
+
+### 2. ワークフローの権限設定
+
+`trstringer/manual-approval` がIssueを作成するため、ワークフローに以下の権限が必要です：
+
+```yaml
+permissions:
+  issues: write    # Issue作成・更新に必要
+  contents: read   # リポジトリ内容の読み取り
+```
+
+これはワークフローファイル内で設定済みです。
+
+もしIssue作成時に `403 Resource not accessible by integration` エラーが発生する場合は、リポジトリの設定を確認してください：
+
+1. **Settings** > **Actions** > **General**
+2. **Workflow permissions** セクション
+3. **Read and write permissions** を選択（または特定の権限を許可）
+
+### 3. 動作確認
+
+設定後、以下の手順で動作確認できます：
+
+1. `main`ブランチに変更をプッシュ（または空コミット）
+   ```bash
+   git commit --allow-empty -m "Test approval workflow"
+   git push
+   ```
+
+2. **Actions** タブでワークフローが実行されることを確認
+
+3. **Issues** タブに承認リクエストが作成されることを確認
+
+4. Issueに `approve` とコメントして承認
+
+5. デプロイが実行され、Issueが自動クローズされることを確認
+
+---
+
 ## 参考情報
 
 ### trstringer/manual-approval Action
