@@ -60,7 +60,7 @@ jobs:
         uses: ./.github/actions/manual-approval
         with:
           approvers: ${{ vars.DEPLOY_APPROVERS }}
-          issue-title: "Staging Deploy Approval - Run #${{ github.run_number }}"
+          issue-title: "STGデプロイ承認リクエスト - Run #${{ github.run_number }}"
           timeout-minutes: "30"
 
       - name: Deploy to Vercel Preview
